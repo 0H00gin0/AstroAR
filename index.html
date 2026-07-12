@@ -133,10 +133,6 @@
       <div class="big" id="timeBig">12:00</div>
       <div class="sub" id="dateSub">—</div>
     </div>
-    <div>
-      <div class="val sunval" id="sunVal">☀ —</div>
-      <div class="val moonval" id="moonVal">☾ —</div>
-    </div>
     <div style="margin-left:auto; text-align:right">
       <div class="val" id="headVal">—</div>
       <div class="sub">camera aim</div>
@@ -144,12 +140,14 @@
   </div>
   <input type="range" class="timeslider" id="timeSlider" min="0" max="1439" step="1" value="720"
          aria-label="Time of day">
-  <div class="controls">
+  <div class="controls" id="ctrlRow" style="display:none">
     <input type="date" id="datePick" aria-label="Date">
     <button class="btn" id="nowBtn">Now</button>
-    <button class="btn" id="moonBtn">☾ Moon on</button>
     <button class="btn primary" id="alignBtn">⌖ Calibrate on Sun</button>
   </div>
+  <button id="moreBtn" aria-expanded="false" aria-label="More controls"
+    style="display:block; margin:8px auto 0; padding:2px 26px; border-radius:9px;
+    background:var(--glass); border:1px solid var(--glass-line); font-size:13px; color:var(--text-dim);">⌄</button>
 </div>
 
 <!-- location sheet -->
@@ -183,6 +181,10 @@
       <input type="range" id="offIn" min="-30" max="30" step="0.5" value="0">
       <div class="hint">Fine-tune heading. Easiest: point the ⌖ crosshair at the real sun and tap “Calibrate on Sun”.</div>
     </div>
+    <div class="field">
+      <label>Moon overlay</label>
+      <button class="btn" id="moonBtn">☾ Moon on</button>
+    </div>
     <div class="sheet-actions">
       <button class="btn" id="resetOff">Reset offset</button>
       <button class="btn primary" id="setClose">Done</button>
@@ -193,7 +195,7 @@
 <div id="start">
   <div class="horizon-deco"></div><div class="monument"></div>
   <h1>Sky<span>line</span></h1>
-  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v3 · sensor diagnostics</p>
+  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v5</p>
   <p>Point your camera at a landmark, scrub to any future date and time, and see exactly where the sun and moon will hang in your frame.</p>
   <button class="btn primary" id="startBtn">Start camera</button>
   <button class="alt" id="virtualBtn">No camera? Use virtual view</button>
@@ -314,7 +316,7 @@ function diagShow(){
   const d=$('diag'); d.style.display='block';
   d.textContent = `fusion:${DIAG.fusion} abs:${DIAG.abs} rel:${DIAG.rel} · src:${sensorSource||'none'} · perm:${DIAG.perm}${DIAG.err?' · '+DIAG.err:''}`;
 }
-setInterval(()=>{ if(S.mode) diagShow(); }, 500);
+if(location.search.includes("debug")) setInterval(()=>{ if(S.mode) diagShow(); }, 500);
 const RANK = {fusion:3, absolute:2, relative:1};
 function setAim(look, up, right, src){
   if(sensorSource && RANK[src] < RANK[sensorSource]) return; // ignore weaker source
@@ -447,7 +449,7 @@ function draw(){
   if(S.mode==null) return;
   if(S.mode==='virtual') drawVirtualSky();
   ctx.clearRect(0,0,W,H);
-  if(S.lat==null){ drawCrosshair(true); updateReadout(null,null); return; }
+  if(S.lat==null){ drawCrosshair(true); updateReadout(); return; }
 
   const when = planDate();
   const sun  = sunPosition(when, S.lat, S.lon);
@@ -509,7 +511,7 @@ function draw(){
   }
 
   drawCrosshair(false);
-  updateReadout(sun, moon);
+  updateReadout();
   /* off-screen sun pointer */
   if(!sp.visible || sp.x<0||sp.x>W||sp.y<0||sp.y>H) drawEdgeArrow(sun);
 }
@@ -556,17 +558,12 @@ function drawEdgeArrow(sun){
 }
 
 function timeStr(min){ return String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0'); }
-function updateReadout(sun){
+function updateReadout(){
   $('timeBig').textContent = timeStr(S.minutes);
   $('dateSub').textContent = planDate().toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
   const aimAz = ((S.heading+S.offset)%360+360)%360;
   const tag = !S.hasSensor ? ' (drag)' : (sensorSource==='relative' ? ' (gyro·cal!)' : '');
   $('headVal').textContent = fmtDeg(aimAz)+' '+azName(aimAz)+tag;
-  if(sun){
-    const moon = moonPosition(planDate(),S.lat,S.lon);
-    $('sunVal').textContent = '☀ '+fmtDeg(sun.az*DEG)+' · alt '+fmtDeg(sun.alt*DEG);
-    $('moonVal').textContent= '☾ '+fmtDeg(moon.az*DEG)+' · alt '+fmtDeg(moon.alt*DEG);
-  } else { $('sunVal').textContent='☀ set location'; $('moonVal').textContent='☾ —'; }
 }
 
 /* ================= UI wiring ================= */
@@ -577,6 +574,12 @@ $('nowBtn').addEventListener('click', ()=>{
   $('timeSlider').value=S.minutes; $('datePick').value=isoDate(n);
 });
 $('moonBtn').addEventListener('click', e=>{ S.showMoon=!S.showMoon; e.target.textContent=S.showMoon?'☾ Moon on':'☾ Moon off'; });
+$('moreBtn').addEventListener('click', e=>{
+  const row=$('ctrlRow'), open = row.style.display!=='none';
+  row.style.display = open?'none':'flex';
+  e.target.textContent = open?'⌄':'⌃';
+  e.target.setAttribute('aria-expanded', String(!open));
+});
 $('alignBtn').addEventListener('click', ()=>{
   if(S.lat==null){ toast('Set your location first.'); return; }
   const nowSun = sunPosition(new Date(), S.lat, S.lon);
