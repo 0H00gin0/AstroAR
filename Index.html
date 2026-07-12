@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Skyline — AR sun & moon planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --sun:#FFC85C; --sun-hot:#FF9E3D; --moon:#C9D6E8;
+    --ink:#0B0E1A; --glass:rgba(11,14,26,.72); --glass-line:rgba(255,255,255,.14);
+    --text:#EDEFF7; --text-dim:rgba(237,239,247,.55);
+    --accent:#FFC85C;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%; overflow:hidden; background:var(--ink);
+    font-family:'Space Grotesk',system-ui,sans-serif; color:var(--text);}
+  button{font-family:inherit; color:inherit; background:none; border:none; cursor:pointer;}
+  input{font-family:inherit;}
+
+  #stage{position:fixed; inset:0;}
+  #cam{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:none;}
+  #virtualSky{position:absolute; inset:0; display:none;}
+  #overlay{position:absolute; inset:0; touch-action:none;}
+
+  /* ---------- top bar ---------- */
+  .topbar{position:fixed; top:0; left:0; right:0; z-index:20;
+    display:flex; align-items:center; gap:8px; padding:10px 12px;
+    padding-top:calc(10px + env(safe-area-inset-top));}
+  .chip{background:var(--glass); border:1px solid var(--glass-line); backdrop-filter:blur(12px);
+    border-radius:99px; padding:8px 14px; font-size:13px; display:flex; align-items:center; gap:7px;
+    white-space:nowrap;}
+  .chip b{font-weight:500;}
+  .chip.icon{padding:8px 11px;}
+  .spacer{flex:1;}
+  .dot{width:7px; height:7px; border-radius:50%; background:#5BE49B; flex:none;}
+  .dot.warn{background:#FF9E3D;}
+
+  /* ---------- bottom panel ---------- */
+  .panel{position:fixed; left:0; right:0; bottom:0; z-index:20;
+    background:linear-gradient(to top, rgba(11,14,26,.92), rgba(11,14,26,.65) 75%, transparent);
+    padding:14px 16px calc(14px + env(safe-area-inset-bottom));}
+  .readout{display:flex; align-items:baseline; gap:14px; margin-bottom:10px; flex-wrap:wrap;}
+  .readout .big{font-size:26px; font-weight:700; letter-spacing:-.01em; font-variant-numeric:tabular-nums;}
+  .readout .sub{font-size:12px; color:var(--text-dim); letter-spacing:.06em; text-transform:uppercase;}
+  .readout .val{font-size:14px; font-variant-numeric:tabular-nums;}
+  .sunval{color:var(--sun);} .moonval{color:var(--moon);}
+
+  .timeslider{width:100%; appearance:none; height:34px; background:transparent;}
+  .timeslider::-webkit-slider-runnable-track{height:4px; border-radius:2px;
+    background:linear-gradient(90deg,#1B2140 0%,#3A2F5C 25%,var(--sun-hot) 42%,var(--sun) 50%,var(--sun-hot) 58%,#3A2F5C 75%,#1B2140 100%);}
+  .timeslider::-webkit-slider-thumb{appearance:none; width:26px; height:26px; margin-top:-11px;
+    border-radius:50%; background:var(--sun); border:3px solid var(--ink);
+    box-shadow:0 0 0 2px var(--sun), 0 2px 10px rgba(255,200,92,.5);}
+  .timeslider::-moz-range-track{height:4px; border-radius:2px;
+    background:linear-gradient(90deg,#1B2140,#3A2F5C 25%,var(--sun) 50%,#3A2F5C 75%,#1B2140);}
+  .timeslider::-moz-range-thumb{width:22px; height:22px; border-radius:50%;
+    background:var(--sun); border:3px solid var(--ink);}
+
+  .controls{display:flex; gap:8px; margin-top:10px; align-items:center; flex-wrap:wrap;}
+  .btn{background:var(--glass); border:1px solid var(--glass-line); border-radius:12px;
+    padding:9px 14px; font-size:13px; font-weight:500;}
+  .btn.primary{background:var(--sun); color:var(--ink); border-color:transparent; font-weight:700;}
+  .btn:active{transform:scale(.97);}
+  input[type="date"]{background:var(--glass); border:1px solid var(--glass-line); border-radius:12px;
+    padding:8px 10px; font-size:13px; color:var(--text); color-scheme:dark;}
+
+  /* ---------- sheets ---------- */
+  .sheet{position:fixed; inset:0; z-index:40; background:rgba(5,7,14,.6); backdrop-filter:blur(4px);
+    display:none; align-items:flex-end; justify-content:center;}
+  .sheet.open{display:flex;}
+  .sheet-card{background:#141830; border:1px solid var(--glass-line); border-radius:20px 20px 0 0;
+    width:100%; max-width:520px; padding:20px 20px calc(24px + env(safe-area-inset-bottom));}
+  .sheet-card h2{font-size:16px; margin-bottom:4px;}
+  .sheet-card p{font-size:13px; color:var(--text-dim); line-height:1.5; margin-bottom:14px;}
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--text-dim); margin-bottom:5px;}
+  .field input[type="number"], .field input[type="text"]{width:100%; background:rgba(255,255,255,.06);
+    border:1px solid var(--glass-line); border-radius:10px; padding:11px 12px; font-size:15px; color:var(--text);}
+  .field input[type="range"]{width:100%;}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .sheet-actions{display:flex; gap:10px; margin-top:16px;}
+  .sheet-actions .btn{flex:1; text-align:center; padding:12px;}
+  .hint{font-size:12px; color:var(--text-dim); margin-top:6px;}
+
+  /* ---------- start screen ---------- */
+  #start{position:fixed; inset:0; z-index:50; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:32px;
+    background:
+      radial-gradient(1200px 600px at 50% 115%, rgba(255,158,61,.28), transparent 60%),
+      radial-gradient(800px 500px at 50% 120%, rgba(255,200,92,.35), transparent 55%),
+      linear-gradient(to top,#1B1230 0%,#0B0E1A 55%,#05070E 100%);}
+  #start h1{font-size:34px; font-weight:700; letter-spacing:-.02em; margin-bottom:10px;}
+  #start h1 span{color:var(--sun);}
+  #start p{max-width:340px; font-size:14.5px; line-height:1.6; color:var(--text-dim); margin-bottom:28px;}
+  #start .btn.primary{font-size:16px; padding:14px 30px; border-radius:14px;}
+  #start .alt{margin-top:14px; font-size:13px; color:var(--text-dim); text-decoration:underline;}
+  .horizon-deco{position:absolute; bottom:0; left:0; right:0; height:120px; pointer-events:none;
+    background:linear-gradient(to top, #05070E 30%, transparent);}
+  .monument{position:absolute; bottom:24px; left:50%; transform:translateX(-50%);
+    width:0; height:0; border-left:26px solid transparent; border-right:26px solid transparent;
+    border-bottom:96px solid #05070E; filter:drop-shadow(0 0 24px rgba(255,158,61,.35));}
+
+  #toast{position:fixed; top:calc(64px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
+    z-index:60; background:var(--glass); border:1px solid var(--glass-line); backdrop-filter:blur(12px);
+    padding:10px 16px; border-radius:12px; font-size:13px; opacity:0; transition:opacity .25s; pointer-events:none;
+    max-width:88vw; text-align:center;}
+  #toast.show{opacity:1;}
+
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important;} }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <video id="cam" autoplay playsinline muted></video>
+  <canvas id="virtualSky"></canvas>
+  <canvas id="overlay"></canvas>
+</div>
+
+<div class="topbar" id="topbar" style="display:none">
+  <div class="spacer"></div>
+  <button class="chip icon" id="setChip" title="Settings">⚙︎</button>
+</div>
+
+<div class="panel" id="panel" style="display:none">
+  <div class="readout">
+    <div>
+      <div class="big" id="timeBig">12:00</div>
+      <div class="sub" id="dateSub">—</div>
+    </div>
+    <div style="margin-left:auto; text-align:right">
+      <div class="val" id="headVal">—</div>
+      <div class="sub">camera aim</div>
+    </div>
+  </div>
+  <input type="range" class="timeslider" id="timeSlider" min="0" max="1439" step="1" value="720"
+         aria-label="Time of day">
+  <div class="controls" id="ctrlRow" style="display:none">
+    <input type="date" id="datePick" aria-label="Date">
+    <button class="btn" id="nowBtn">Now</button>
+    <button class="btn primary" id="alignBtn">⌖ Calibrate on Sun</button>
+  </div>
+  <button id="moreBtn" aria-expanded="false" aria-label="More controls"
+    style="display:block; margin:8px auto 0; padding:2px 26px; border-radius:9px;
+    background:var(--glass); border:1px solid var(--glass-line); font-size:13px; color:var(--text-dim);">⌄</button>
+</div>
+
+<!-- location sheet -->
+<div class="sheet" id="locSheet">
+  <div class="sheet-card">
+    <h2>Location</h2>
+    <p>Where are you standing? Use GPS, or type coordinates to plan a shot from somewhere else.</p>
+    <div class="row2">
+      <div class="field"><label>Latitude</label><input type="number" id="latIn" step="0.0001" placeholder="51.1789"></div>
+      <div class="field"><label>Longitude</label><input type="number" id="lonIn" step="0.0001" placeholder="-1.8262"></div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn" id="gpsBtn">📍 Use GPS</button>
+      <button class="btn primary" id="locSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- settings sheet -->
+<div class="sheet" id="setSheet">
+  <div class="sheet-card">
+    <h2>Settings</h2>
+    <p>Match the overlay to your camera and correct the compass.</p>
+    <div class="field">
+      <label>Location</label>
+      <button class="btn" id="locChip" style="width:100%; display:flex; align-items:center; gap:8px;">
+        <span class="dot warn" id="locDot"></span><b id="locLabel">Set location</b></button>
+    </div>
+    <div class="field">
+      <label>Camera field of view — <span id="fovVal">65</span>° horizontal</label>
+      <input type="range" id="fovIn" min="30" max="110" step="1" value="65">
+      <div class="hint">If the sun overlay drifts as you pan, nudge this until real objects and the compass ribbon move together.</div>
+    </div>
+    <div class="field">
+      <label>Compass offset — <span id="offVal">0.0</span>°</label>
+      <input type="range" id="offIn" min="-30" max="30" step="0.5" value="0">
+      <div class="hint">Fine-tune heading. Easiest: point the ⌖ crosshair at the real sun and tap “Calibrate on Sun”.</div>
+    </div>
+    <div class="field">
+      <label>Moon overlay</label>
+      <button class="btn" id="moonBtn">☾ Moon on</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn" id="resetOff">Reset offset</button>
+      <button class="btn primary" id="setClose">Done</button>
+    </div>
+  </div>
+</div>
+
+<div id="start">
+  <div class="horizon-deco"></div><div class="monument"></div>
+  <h1>Sky<span>line</span></h1>
+  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v10</p>
+  <p>Point your camera at a landmark, scrub to any future date and time, and see exactly where the sun and moon will hang in your frame.</p>
+  <button class="btn primary" id="startBtn">Start camera</button>
+  <button class="alt" id="virtualBtn">No camera? Use virtual view</button>
+</div>
+
+<div id="toast"></div>
+<div id="diag" style="position:fixed; left:10px; bottom:calc(196px + env(safe-area-inset-bottom)); z-index:25;
+  font-size:10px; color:rgba(255,255,255,.75); background:rgba(0,0,0,.45); padding:4px 8px; border-radius:8px;
+  font-variant-numeric:tabular-nums; display:none;"></div>
+
+<script>
+"use strict";
+/* ================= astronomy (SunCalc-style, standard low-precision algorithms) ================= */
+const RAD = Math.PI/180, DEG = 180/Math.PI, E_OBL = 23.4397*RAD;
+const dayMs = 86400000, J1970 = 2440588, J2000 = 2451545;
+const toDays = date => date.valueOf()/dayMs - 0.5 + J1970 - J2000;
+
+const rightAscension = (l,b) => Math.atan2(Math.sin(l)*Math.cos(E_OBL) - Math.tan(b)*Math.sin(E_OBL), Math.cos(l));
+const declination    = (l,b) => Math.asin(Math.sin(b)*Math.cos(E_OBL) + Math.cos(b)*Math.sin(E_OBL)*Math.sin(l));
+const siderealTime   = (d,lw) => RAD*(280.16 + 360.9856235*d) - lw;
+
+function altAz(H, phi, dec){
+  const alt = Math.asin(Math.sin(phi)*Math.sin(dec) + Math.cos(phi)*Math.cos(dec)*Math.cos(H));
+  // azimuth from NORTH, clockwise (SunCalc measures from south; +PI converts)
+  const az = Math.atan2(Math.sin(H), Math.cos(H)*Math.sin(phi) - Math.tan(dec)*Math.cos(phi)) + Math.PI;
+  return {alt, az: (az%(2*Math.PI)+2*Math.PI)%(2*Math.PI)};
+}
+function solarCoords(d){
+  const M = RAD*(357.5291 + 0.98560028*d);
+  const C = RAD*(1.9148*Math.sin(M) + 0.02*Math.sin(2*M) + 0.0003*Math.sin(3*M));
+  const L = M + C + RAD*102.9372 + Math.PI;
+  return {dec: declination(L,0), ra: rightAscension(L,0)};
+}
+function sunPosition(date, lat, lon){
+  const lw = -lon*RAD, phi = lat*RAD, d = toDays(date);
+  const c = solarCoords(d), H = siderealTime(d,lw) - c.ra;
+  return altAz(H, phi, c.dec);
+}
+function moonCoords(d){
+  const L = RAD*(218.316 + 13.176396*d),
+        M = RAD*(134.963 + 13.064993*d),
+        F = RAD*(93.272  + 13.229350*d),
+        l = L + RAD*6.289*Math.sin(M),
+        b = RAD*5.128*Math.sin(F),
+        dt = 385001 - 20905*Math.cos(M);
+  return {ra: rightAscension(l,b), dec: declination(l,b), dist: dt};
+}
+function moonPosition(date, lat, lon){
+  const lw=-lon*RAD, phi=lat*RAD, d=toDays(date);
+  const c = moonCoords(d), H = siderealTime(d,lw) - c.ra;
+  let {alt, az} = altAz(H, phi, c.dec);
+  alt += RAD*0.017/Math.tan(alt + RAD*10.26/(alt+RAD*5.10)); // refraction approx
+  return {alt, az, dist:c.dist};
+}
+function moonIllumination(date){
+  const d = toDays(date), s = solarCoords(d), m = moonCoords(d), sdist = 149598000;
+  const phi = Math.acos(Math.sin(s.dec)*Math.sin(m.dec) + Math.cos(s.dec)*Math.cos(m.dec)*Math.cos(s.ra-m.ra));
+  const inc = Math.atan2(sdist*Math.sin(phi), m.dist - sdist*Math.cos(phi));
+  return (1+Math.cos(inc))/2;
+}
+
+/* ================= app state ================= */
+const S = {
+  lat: null, lon: null,
+  date: new Date(),          // date being planned
+  minutes: (()=>{const n=new Date(); return n.getHours()*60+n.getMinutes();})(),
+  fovH: 65,                  // horizontal FOV degrees
+  offset: 0,                 // compass correction degrees
+  showMoon: true,
+  mode: null,                // 'camera' | 'virtual'
+  heading: 180, pitch: 10, roll: 0,   // camera aim (deg)
+  hasSensor: false
+};
+try{
+  const saved = JSON.parse(localStorage_shim('skyline')||'{}');
+  Object.assign(S, {lat:saved.lat??null, lon:saved.lon??null, fovH:saved.fovH??65, offset:saved.offset??0});
+}catch(e){}
+function localStorage_shim(k,v){ // storage may be unavailable in sandboxed iframes
+  try{ if(v!==undefined){window.localStorage.setItem(k,v); return;} return window.localStorage.getItem(k);}catch(e){return null;}
+}
+function persist(){ localStorage_shim('skyline', JSON.stringify({lat:S.lat,lon:S.lon,fovH:S.fovH,offset:S.offset})); }
+
+/* ================= DOM ================= */
+const $ = id => document.getElementById(id);
+const cam=$('cam'), overlay=$('overlay'), vsky=$('virtualSky'), ctx=overlay.getContext('2d'), vctx=vsky.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  for(const c of [overlay,vsky]){ c.width=W*DPR; c.height=H*DPR; c.style.width=W+'px'; c.style.height=H+'px'; }
+  ctx.setTransform(DPR,0,0,DPR,0,0); vctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize); resize();
+
+function toast(msg, ms=2600){
+  const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'), ms);
+}
+
+/* ================= orientation (Android: deviceorientationabsolute) ================= */
+const Vec = {
+  rotZ:(v,a)=>[v[0]*Math.cos(a)-v[1]*Math.sin(a), v[0]*Math.sin(a)+v[1]*Math.cos(a), v[2]],
+  rotX:(v,a)=>[v[0], v[1]*Math.cos(a)-v[2]*Math.sin(a), v[1]*Math.sin(a)+v[2]*Math.cos(a)],
+  rotY:(v,a)=>[v[0]*Math.cos(a)+v[2]*Math.sin(a), v[1], -v[0]*Math.sin(a)+v[2]*Math.cos(a)]
+};
+function deviceToWorld(v, a, b, g){ // intrinsic Z-X'-Y'' → apply Y, then X, then Z
+  return Vec.rotZ(Vec.rotX(Vec.rotY(v, g), b), a);
+}
+function screenAngle(){
+  return ((screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0) * RAD;
+}
+/* Sensor priority: 1) AbsoluteOrientationSensor (fusion, best on Android Chrome)
+   2) deviceorientationabsolute  3) plain deviceorientation (relative — heading is
+   arbitrary until "Calibrate on Sun" pins it). All are attached; best source wins. */
+let sensorSource = null; // 'fusion' | 'absolute' | 'relative'
+const DIAG = {fusion:0, abs:0, rel:0, err:'', perm:'?'};
+function diagShow(){
+  const d=$('diag'); d.style.display='block';
+  d.textContent = `fusion:${DIAG.fusion} abs:${DIAG.abs} rel:${DIAG.rel} · src:${sensorSource||'none'} · perm:${DIAG.perm}${DIAG.err?' · '+DIAG.err:''}`;
+}
+if(location.search.includes("debug")) setInterval(()=>{ if(S.mode) diagShow(); }, 500);
+const RANK = {fusion:3, absolute:2, relative:1};
+function setAim(look, up, right, src){
+  if(sensorSource && RANK[src] < RANK[sensorSource]) return; // ignore weaker source
+  if(sensorSource !== src){
+    sensorSource = src; S.hasSensor = true;
+    if(src==='relative' && !setAim._warnT){
+      // compass sources often start a beat later — warn only if still gyro-only shortly
+      setAim._warnT = setTimeout(()=>{
+        if(sensorSource==='relative')
+          toast('Gyro only (no compass). Aim the ⌖ at the sun and tap “Calibrate on Sun” to set north.', 5000);
+      }, 2500);
+    }
+  }
+  S.heading = ((Math.atan2(look[0], look[1])*DEG)%360+360)%360;
+  S.pitch   = Math.asin(Math.max(-1,Math.min(1,look[2])))*DEG;
+  S.roll    = Math.atan2(right[2], (up[2]===0&&right[2]===0)?1:up[2])*DEG * -1;
+}
+function aimFromEuler(a, b, g, src){
+  const sa = screenAngle();
+  const look = deviceToWorld(Vec.rotZ([0,0,-1],-sa), a,b,g);
+  const up   = deviceToWorld(Vec.rotZ([0,1,0],-sa),  a,b,g);
+  const right= deviceToWorld(Vec.rotZ([1,0,0],-sa),  a,b,g);
+  setAim(look, up, right, src);
+}
+function qRotate(q, v){ // rotate vector by quaternion [x,y,z,w]
+  const qx=q[0],qy=q[1],qz=q[2],qw=q[3];
+  const tx=2*(qy*v[2]-qz*v[1]), ty=2*(qz*v[0]-qx*v[2]), tz=2*(qx*v[1]-qy*v[0]);
+  return [v[0]+qw*tx+qy*tz-qz*ty, v[1]+qw*ty+qz*tx-qx*tz, v[2]+qw*tz+qx*ty-qy*tx];
+}
+function aimFromQuaternion(q){
+  const sa = screenAngle();
+  const look = qRotate(q, Vec.rotZ([0,0,-1],-sa));
+  const up   = qRotate(q, Vec.rotZ([0,1,0],-sa));
+  const right= qRotate(q, Vec.rotZ([1,0,0],-sa));
+  setAim(look, up, right, 'fusion');
+}
+function onOrientAbs(e){ if(e.alpha!=null){ DIAG.abs++; aimFromEuler(e.alpha*RAD, e.beta*RAD, e.gamma*RAD, 'absolute'); } }
+function onOrientAny(e){
+  if(e.alpha==null) return;
+  DIAG.rel++;
+  aimFromEuler(e.alpha*RAD, e.beta*RAD, e.gamma*RAD, e.absolute===true ? 'absolute' : 'relative');
+}
+function startSensors(){
+  // report the motion-sensor permission state if queryable
+  if(navigator.permissions && navigator.permissions.query){
+    Promise.all(['accelerometer','gyroscope','magnetometer'].map(n=>
+      navigator.permissions.query({name:n}).then(r=>r.state).catch(()=> 'n/a')
+    )).then(states=>{ DIAG.perm = states.join('/'); }).catch(()=>{});
+  }
+  // Layer 1: Generic Sensor API fusion sensor
+  if('AbsoluteOrientationSensor' in window){
+    try{
+      const s = new AbsoluteOrientationSensor({frequency:30});
+      s.addEventListener('reading', ()=>{ if(s.quaternion){ DIAG.fusion++; aimFromQuaternion(s.quaternion); } });
+      s.addEventListener('error', ev=>{ DIAG.err='fusion:'+(ev.error?ev.error.name:'err'); });
+      s.start();
+    }catch(e){ DIAG.err='fusion:'+e.name; }
+  } else if(!DIAG.err){ DIAG.err='no-fusion-api'; }
+  // Layers 2 & 3: classic events (both attached; setAim keeps the best)
+  const attach = ()=>{
+    window.addEventListener('deviceorientationabsolute', onOrientAbs, true);
+    window.addEventListener('deviceorientation', onOrientAny, true);
+  };
+  if (typeof DeviceOrientationEvent!=='undefined' && DeviceOrientationEvent.requestPermission){
+    DeviceOrientationEvent.requestPermission().then(r=>{ if(r==='granted') attach(); }).catch(attach);
+  } else attach();
+  setTimeout(()=>{ if(!S.hasSensor && S.mode==='camera')
+    toast('No motion data. Chrome ⋮ → Settings → Site settings → Motion sensors → allow, then reload. Drag to aim meanwhile.', 6000); }, 3500);
+}
+
+/* drag-to-look (virtual mode, or sensor fallback) */
+let dragging=null;
+overlay.addEventListener('pointerdown', e=>{ if(!S.hasSensor){ dragging={x:e.clientX,y:e.clientY,h:S.heading,p:S.pitch}; } });
+window.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  const dppx = S.fovH / W;
+  S.heading = ((dragging.h - (e.clientX-dragging.x)*dppx)%360+360)%360;
+  S.pitch   = Math.max(-89, Math.min(89, dragging.p + (e.clientY-dragging.y)*dppx));
+});
+window.addEventListener('pointerup', ()=>dragging=null);
+
+/* ================= projection ================= */
+function project(azDeg, altDeg){
+  const ppd = W / S.fovH;                       // pixels per degree
+  let dAz = azDeg - (S.heading + S.offset);
+  dAz = ((dAz+540)%360)-180;
+  const dAlt = altDeg - S.pitch;
+  let x = dAz*ppd, y = -dAlt*ppd;               // relative to center, screen-up positive
+  if(S.hasSensor && Math.abs(S.roll)>0.2){       // counter-rotate for device roll
+    const r=-S.roll*RAD, c=Math.cos(r), s=Math.sin(r);
+    [x,y]=[x*c-y*s, x*s+y*c];
+  }
+  return {x:W/2+x, y:H/2+y, dAz, visible: Math.abs(dAz)<S.fovH*1.5};
+}
+
+/* ================= drawing ================= */
+const fmtDeg = v => (Math.round(v*10)/10).toFixed(1)+'°';
+const AZ_NAMES=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const azName = a => AZ_NAMES[Math.round(a/22.5)%16];
+
+function planDate(){
+  const d = new Date(S.date);
+  d.setHours(Math.floor(S.minutes/60), S.minutes%60, 0, 0);
+  return d;
+}
+
+function drawVirtualSky(t){
+  // simple gradient sky + ground for no-camera mode
+  const sun = sunPosition(planDate(), S.lat??0, S.lon??0);
+  const day = Math.max(0, Math.min(1, (sun.alt*DEG+6)/30));
+  const g = vctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, `rgb(${8+40*day},${10+90*day},${26+160*day})`);
+  g.addColorStop(1, `rgb(${20+150*day},${16+120*day},${40+90*day})`);
+  vctx.fillStyle=g; vctx.fillRect(0,0,W,H);
+  const hor = project(S.heading+S.offset, 0).y;
+  vctx.fillStyle = `rgb(${12+20*day},${14+22*day},${18+20*day})`;
+  vctx.fillRect(0, Math.max(0,hor), W, H);
+}
+
+function drawBody(p, r, core, glow, label, sub){
+  const grad = ctx.createRadialGradient(p.x,p.y,r*0.2, p.x,p.y,r*3.2);
+  grad.addColorStop(0, glow); grad.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(p.x,p.y,r*3.2,0,7); ctx.fill();
+  ctx.fillStyle=core; ctx.beginPath(); ctx.arc(p.x,p.y,r,0,7); ctx.fill();
+  ctx.font='600 13px Space Grotesk,sans-serif'; ctx.textAlign='center';
+  ctx.fillStyle='rgba(0,0,0,.55)';
+  ctx.fillText(label, p.x+1, p.y-r-19); ctx.fillText(sub, p.x+1, p.y-r-5);
+  ctx.fillStyle='#fff';
+  ctx.fillText(label, p.x, p.y-r-20);
+  ctx.fillStyle='rgba(255,255,255,.8)';
+  ctx.fillText(sub, p.x, p.y-r-6);
+}
+
+function draw(){
+  requestAnimationFrame(draw);
+  if(S.mode==null) return;
+  if(S.mode==='virtual') drawVirtualSky();
+  ctx.clearRect(0,0,W,H);
+  if(S.lat==null){ drawCrosshair(true); updateReadout(); return; }
+
+  const when = planDate();
+  const sun  = sunPosition(when, S.lat, S.lon);
+  const moon = moonPosition(when, S.lat, S.lon);
+
+  /* horizon line + compass ribbon */
+  ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.lineWidth=1;
+  ctx.setLineDash([6,6]);
+  drawGreatLine(0);            // horizon at alt 0
+  ctx.setLineDash([]);
+  drawCompassTicks();
+
+  /* sun path for the chosen date (the signature: tomorrow's arc, today) */
+  ctx.strokeStyle='rgba(255,200,92,.55)'; ctx.lineWidth=2;
+  ctx.beginPath(); let started=false;
+  const d0 = new Date(when); d0.setHours(0,0,0,0);
+  for(let m=0;m<=1440;m+=8){
+    const t=new Date(d0.getTime()+m*60000), s=sunPosition(t,S.lat,S.lon);
+    const p=project(s.az*DEG, s.alt*DEG);
+    if(!p.visible || s.alt*DEG<-12){ started=false; continue; }
+    if(!started){ctx.moveTo(p.x,p.y); started=true;} else ctx.lineTo(p.x,p.y);
+  }
+  ctx.stroke();
+  /* hour dots on the path */
+  ctx.fillStyle='rgba(255,200,92,.9)';
+  ctx.font='500 10px Space Grotesk,sans-serif'; ctx.textAlign='center';
+  for(let h=0;h<24;h++){
+    const t=new Date(d0.getTime()+h*3600000), s=sunPosition(t,S.lat,S.lon);
+    if(s.alt*DEG<-6) continue;
+    const p=project(s.az*DEG, s.alt*DEG);
+    if(!p.visible) continue;
+    ctx.beginPath(); ctx.arc(p.x,p.y,2.5,0,7); ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.75)'; ctx.fillText(String(h), p.x, p.y-7);
+    ctx.fillStyle='rgba(255,200,92,.9)';
+  }
+
+  /* moon path (dotted) */
+  if(S.showMoon){
+    ctx.strokeStyle='rgba(201,214,232,.4)'; ctx.lineWidth=1.5; ctx.setLineDash([2,7]);
+    ctx.beginPath(); started=false;
+    for(let m=0;m<=1440;m+=10){
+      const t=new Date(d0.getTime()+m*60000), mo=moonPosition(t,S.lat,S.lon);
+      const p=project(mo.az*DEG, mo.alt*DEG);
+      if(!p.visible || mo.alt*DEG<-8){started=false;continue;}
+      if(!started){ctx.moveTo(p.x,p.y); started=true;} else ctx.lineTo(p.x,p.y);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  /* bodies */
+  const sp = project(sun.az*DEG, sun.alt*DEG);
+  const sunR = Math.max(10, (W/S.fovH)*0.53);   // real angular size ≈0.53°, min 10px for visibility
+  if(sp.visible) drawBody(sp, sunR, '#FFDD87','rgba(255,180,60,.55)',
+      '☀ '+timeStr(S.minutes), fmtDeg(sun.az*DEG)+' '+azName(sun.az*DEG)+' · alt '+fmtDeg(sun.alt*DEG));
+  if(S.showMoon){
+    const mp = project(moon.az*DEG, moon.alt*DEG);
+    if(mp.visible) drawBody(mp, Math.max(8,(W/S.fovH)*0.5), '#DDE6F2','rgba(180,200,230,.4)',
+        '☾ '+Math.round(moonIllumination(when)*100)+'%', fmtDeg(moon.az*DEG)+' · alt '+fmtDeg(moon.alt*DEG));
+  }
+
+  drawCrosshair(false);
+  updateReadout();
+  /* off-screen sun pointer */
+  if(!sp.visible || sp.x<0||sp.x>W||sp.y<0||sp.y>H) drawEdgeArrow(sun);
+}
+
+function drawGreatLine(altDeg){ // horizontal line of constant altitude across view
+  ctx.beginPath(); let started=false;
+  for(let px=0; px<=W; px+=16){
+    const dAz = (px - W/2)/(W/S.fovH);
+    const p = project(S.heading+S.offset+dAz, altDeg);
+    if(!started){ctx.moveTo(p.x,p.y); started=true;} else ctx.lineTo(p.x,p.y);
+  }
+  ctx.stroke();
+}
+function drawCompassTicks(){
+  ctx.font='600 12px Space Grotesk,sans-serif'; ctx.textAlign='center';
+  for(let a=0;a<360;a+=15){
+    const p=project(a,0);
+    if(!p.visible||p.x<-30||p.x>W+30) continue;
+    const major = a%90===0;
+    ctx.strokeStyle= major?'rgba(255,255,255,.8)':'rgba(255,255,255,.35)';
+    ctx.lineWidth= major?2:1;
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x,p.y+(major?12:7)); ctx.stroke();
+    if(major){ ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillText(azName(a),p.x+1,p.y+28);
+               ctx.fillStyle='#fff'; ctx.fillText(azName(a),p.x,p.y+27); }
+  }
+}
+function drawCrosshair(dim){
+  ctx.strokeStyle= dim?'rgba(255,255,255,.3)':'rgba(255,255,255,.85)'; ctx.lineWidth=1.5;
+  const c=14;
+  ctx.beginPath();
+  ctx.moveTo(W/2-c,H/2); ctx.lineTo(W/2-4,H/2); ctx.moveTo(W/2+4,H/2); ctx.lineTo(W/2+c,H/2);
+  ctx.moveTo(W/2,H/2-c); ctx.lineTo(W/2,H/2-4); ctx.moveTo(W/2,H/2+4); ctx.lineTo(W/2,H/2+c);
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(W/2,H/2,2,0,7); ctx.stroke();
+}
+function drawEdgeArrow(sun){
+  const target = ((sun.az*DEG - (S.heading+S.offset))+540)%360-180;
+  const x = target>0 ? W-26 : 26, dir = target>0?1:-1;
+  ctx.fillStyle='var(--sun)'; ctx.fillStyle='#FFC85C';
+  ctx.beginPath();
+  ctx.moveTo(x+10*dir, H/2); ctx.lineTo(x-6*dir,H/2-10); ctx.lineTo(x-6*dir,H/2+10); ctx.closePath(); ctx.fill();
+  ctx.font='600 11px Space Grotesk,sans-serif'; ctx.textAlign='center'; ctx.fillStyle='#FFC85C';
+  ctx.fillText('☀ '+Math.abs(Math.round(target))+'°', x - 14*dir, H/2+26);
+}
+
+function timeStr(min){ return String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0'); }
+function updateReadout(){
+  $('timeBig').textContent = timeStr(S.minutes);
+  $('dateSub').textContent = planDate().toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+  const aimAz = ((S.heading+S.offset)%360+360)%360;
+  const tag = !S.hasSensor ? ' (drag)' : (sensorSource==='relative' ? ' (gyro·cal!)' : '');
+  $('headVal').textContent = fmtDeg(aimAz)+' '+azName(aimAz)+tag;
+}
+
+/* ================= UI wiring ================= */
+$('timeSlider').addEventListener('input', e=> S.minutes=+e.target.value);
+$('datePick').addEventListener('change', e=>{ if(e.target.value) S.date=new Date(e.target.value+'T12:00:00'); });
+$('nowBtn').addEventListener('click', ()=>{
+  const n=new Date(); S.date=n; S.minutes=n.getHours()*60+n.getMinutes();
+  $('timeSlider').value=S.minutes; $('datePick').value=isoDate(n);
+});
+$('moonBtn').addEventListener('click', e=>{ S.showMoon=!S.showMoon; e.target.textContent=S.showMoon?'☾ Moon on':'☾ Moon off'; });
+$('moreBtn').addEventListener('click', e=>{
+  const row=$('ctrlRow'), open = row.style.display!=='none';
+  row.style.display = open?'none':'flex';
+  e.target.textContent = open?'⌄':'⌃';
+  e.target.setAttribute('aria-expanded', String(!open));
+});
+function btnFlash(msg, ms=3000){
+  const b=$('alignBtn'); b.textContent=msg;
+  clearTimeout(btnFlash._t); btnFlash._t=setTimeout(()=>{ b.textContent='⌖ Calibrate on Sun'; }, ms);
+}
+$('alignBtn').addEventListener('click', ()=>{
+  if(S.lat==null){ btnFlash('✗ Set location first'); toast('Set your location first (⚙︎ → Location).'); return; }
+  const nowSun = sunPosition(new Date(), S.lat, S.lon);
+  if(nowSun.alt*DEG < -1){ btnFlash('✗ Sun is below horizon'); toast('Sun is below the horizon right now — use the ⚙︎ offset slider instead.'); return; }
+  const diff = ((nowSun.az*DEG - S.heading)+540)%360-180;
+  if(Math.abs(diff)>110){
+    btnFlash('✗ Real sun: '+Math.round(nowSun.az*DEG)+'° · you: '+Math.round(S.heading)+'°', 5000);
+    toast('Aim at the REAL sun in the sky right now (not the overlay one — that follows your time slider). It should be around '+Math.round(nowSun.az*DEG)+'° '+azName(nowSun.az*DEG)+', alt '+Math.round(nowSun.alt*DEG)+'°. If that direction seems wrong, re-check your location in ⚙︎.', 7000);
+    return;
+  }
+  S.offset = Math.round(diff*10)/10; persist();
+  $('offIn').value=S.offset; $('offVal').textContent=S.offset.toFixed(1);
+  btnFlash('✓ Calibrated '+(S.offset>=0?'+':'')+S.offset.toFixed(1)+'°');
+  toast('Compass calibrated: offset '+(S.offset>=0?'+':'')+S.offset.toFixed(1)+'°');
+});
+
+$('locChip').addEventListener('click', ()=>{ $('setSheet').classList.remove('open'); $('latIn').value=S.lat??''; $('lonIn').value=S.lon??''; $('locSheet').classList.add('open'); });
+$('locSheet').addEventListener('click', e=>{ if(e.target.id==='locSheet') $('locSheet').classList.remove('open'); });
+$('locSave').addEventListener('click', ()=>{
+  const la=parseFloat($('latIn').value), lo=parseFloat($('lonIn').value);
+  if(isNaN(la)||isNaN(lo)||Math.abs(la)>90||Math.abs(lo)>180){ toast('Enter a valid latitude and longitude.'); return; }
+  setLocation(la,lo,'manual'); $('locSheet').classList.remove('open');
+});
+$('gpsBtn').addEventListener('click', ()=>{
+  if(!navigator.geolocation){ toast('GPS unavailable in this browser.'); return; }
+  toast('Getting GPS fix…');
+  navigator.geolocation.getCurrentPosition(
+    p=>{ setLocation(p.coords.latitude,p.coords.longitude,'GPS'); $('locSheet').classList.remove('open'); },
+    ()=> toast('GPS failed — enter coordinates manually.'), {enableHighAccuracy:true, timeout:12000});
+});
+function setLocation(la,lo,src){
+  S.lat=Math.round(la*10000)/10000; S.lon=Math.round(lo*10000)/10000; persist();
+  $('locLabel').textContent = S.lat.toFixed(3)+', '+S.lon.toFixed(3);
+  $('locDot').classList.remove('warn');
+  toast('Location set ('+src+').');
+}
+
+$('setChip').addEventListener('click', ()=> $('setSheet').classList.add('open'));
+$('setSheet').addEventListener('click', e=>{ if(e.target.id==='setSheet') $('setSheet').classList.remove('open'); });
+$('setClose').addEventListener('click', ()=> $('setSheet').classList.remove('open'));
+$('fovIn').addEventListener('input', e=>{ S.fovH=+e.target.value; $('fovVal').textContent=S.fovH; persist(); });
+$('offIn').addEventListener('input', e=>{ S.offset=+e.target.value; $('offVal').textContent=S.offset.toFixed(1); persist(); });
+$('resetOff').addEventListener('click', ()=>{ S.offset=0; $('offIn').value=0; $('offVal').textContent='0.0'; persist(); });
+
+const isoDate = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+
+async function begin(mode){
+  S.mode=mode;
+  $('start').style.display='none';
+  $('topbar').style.display='flex';
+  $('panel').style.display='block';
+  $('datePick').value=isoDate(S.date);
+  $('timeSlider').value=S.minutes;
+  $('fovIn').value=S.fovH; $('fovVal').textContent=S.fovH;
+  $('offIn').value=S.offset; $('offVal').textContent=S.offset.toFixed(1);
+  if(S.lat!=null){ $('locLabel').textContent=S.lat.toFixed(3)+', '+S.lon.toFixed(3); $('locDot').classList.remove('warn'); }
+
+  if(mode==='camera'){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video:{facingMode:{ideal:'environment'}, width:{ideal:1920}}, audio:false});
+      cam.srcObject=stream; cam.style.display='block';
+      const track=stream.getVideoTracks()[0], st=track.getSettings?track.getSettings():{};
+      if(st && st.facingMode==='user') toast('Front camera in use — flip your phone or check permissions.');
+    }catch(err){
+      toast('Camera blocked ('+(err.name||'error')+'). Switching to virtual view.');
+      S.mode='virtual'; vsky.style.display='block';
+    }
+    startSensors();
+  } else {
+    vsky.style.display='block';
+    toast('Virtual view: drag to look around.');
+  }
+  if(S.lat==null){
+    // try GPS silently once
+    if(navigator.geolocation) navigator.geolocation.getCurrentPosition(
+      p=>setLocation(p.coords.latitude,p.coords.longitude,'GPS'), ()=>{ toast('Set your location in ⚙︎ Settings.'); }, {timeout:8000});
+    else toast('Set your location in ⚙︎ Settings.');
+  }
+}
+$('startBtn').addEventListener('click', ()=>begin('camera'));
+$('virtualBtn').addEventListener('click', ()=>begin('virtual'));
+
+draw();
+</script>
+</body>
+</html>
