@@ -198,7 +198,7 @@
 <div id="start">
   <div class="horizon-deco"></div><div class="monument"></div>
   <h1>Sky<span>line</span></h1>
-  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v8</p>
+  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v9</p>
   <p>Point your camera at a landmark, scrub to any future date and time, and see exactly where the sun and moon will hang in your frame.</p>
   <button class="btn primary" id="startBtn">Start camera</button>
   <button class="alt" id="virtualBtn">No camera? Use virtual view</button>
@@ -598,7 +598,11 @@ $('alignBtn').addEventListener('click', ()=>{
   const nowSun = sunPosition(new Date(), S.lat, S.lon);
   if(nowSun.alt*DEG < -1){ btnFlash('✗ Sun is below horizon'); toast('Sun is below the horizon right now — use the ⚙︎ offset slider instead.'); return; }
   const diff = ((nowSun.az*DEG - S.heading)+540)%360-180;
-  if(Math.abs(diff)>45){ btnFlash('✗ Aim ⌖ at the sun first'); toast('Point the crosshair at the actual sun, then tap again.'); return; }
+  if(Math.abs(diff)>45){
+    btnFlash('✗ Real sun: '+Math.round(nowSun.az*DEG)+'° · you: '+Math.round(S.heading)+'°', 5000);
+    toast('Aim at the REAL sun in the sky right now (not the overlay one — that follows your time slider). It should be around '+Math.round(nowSun.az*DEG)+'° '+azName(nowSun.az*DEG)+', alt '+Math.round(nowSun.alt*DEG)+'°. If that direction seems wrong, re-check your location in ⚙︎.', 7000);
+    return;
+  }
   S.offset = Math.round(diff*10)/10; persist();
   $('offIn').value=S.offset; $('offVal').textContent=S.offset.toFixed(1);
   btnFlash('✓ Calibrated '+(S.offset>=0?'+':'')+S.offset.toFixed(1)+'°');
