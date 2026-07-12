@@ -121,9 +121,7 @@
 </div>
 
 <div class="topbar" id="topbar" style="display:none">
-  <button class="chip" id="locChip"><span class="dot warn" id="locDot"></span><b id="locLabel">Set location</b></button>
   <div class="spacer"></div>
-  <button class="chip icon" id="calChip" title="Calibrate compass">🧭 <b id="calLabel">±0°</b></button>
   <button class="chip icon" id="setChip" title="Settings">⚙︎</button>
 </div>
 
@@ -172,6 +170,11 @@
     <h2>Settings</h2>
     <p>Match the overlay to your camera and correct the compass.</p>
     <div class="field">
+      <label>Location</label>
+      <button class="btn" id="locChip" style="width:100%; display:flex; align-items:center; gap:8px;">
+        <span class="dot warn" id="locDot"></span><b id="locLabel">Set location</b></button>
+    </div>
+    <div class="field">
       <label>Camera field of view — <span id="fovVal">65</span>° horizontal</label>
       <input type="range" id="fovIn" min="30" max="110" step="1" value="65">
       <div class="hint">If the sun overlay drifts as you pan, nudge this until real objects and the compass ribbon move together.</div>
@@ -195,7 +198,7 @@
 <div id="start">
   <div class="horizon-deco"></div><div class="monument"></div>
   <h1>Sky<span>line</span></h1>
-  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v5</p>
+  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v8</p>
   <p>Point your camera at a landmark, scrub to any future date and time, and see exactly where the sun and moon will hang in your frame.</p>
   <button class="btn primary" id="startBtn">Start camera</button>
   <button class="alt" id="virtualBtn">No camera? Use virtual view</button>
@@ -322,7 +325,13 @@ function setAim(look, up, right, src){
   if(sensorSource && RANK[src] < RANK[sensorSource]) return; // ignore weaker source
   if(sensorSource !== src){
     sensorSource = src; S.hasSensor = true;
-    if(src==='relative') toast('Gyro only (no compass). Aim the ⌖ at the sun and tap “Calibrate on Sun” to set north.', 5000);
+    if(src==='relative' && !setAim._warnT){
+      // compass sources often start a beat later — warn only if still gyro-only shortly
+      setAim._warnT = setTimeout(()=>{
+        if(sensorSource==='relative')
+          toast('Gyro only (no compass). Aim the ⌖ at the sun and tap “Calibrate on Sun” to set north.', 5000);
+      }, 2500);
+    }
   }
   S.heading = ((Math.atan2(look[0], look[1])*DEG)%360+360)%360;
   S.pitch   = Math.asin(Math.max(-1,Math.min(1,look[2])))*DEG;
@@ -580,19 +589,23 @@ $('moreBtn').addEventListener('click', e=>{
   e.target.textContent = open?'⌄':'⌃';
   e.target.setAttribute('aria-expanded', String(!open));
 });
+function btnFlash(msg, ms=3000){
+  const b=$('alignBtn'); b.textContent=msg;
+  clearTimeout(btnFlash._t); btnFlash._t=setTimeout(()=>{ b.textContent='⌖ Calibrate on Sun'; }, ms);
+}
 $('alignBtn').addEventListener('click', ()=>{
-  if(S.lat==null){ toast('Set your location first.'); return; }
+  if(S.lat==null){ btnFlash('✗ Set location first'); toast('Set your location first (⚙︎ → Location).'); return; }
   const nowSun = sunPosition(new Date(), S.lat, S.lon);
-  if(nowSun.alt*DEG < -1){ toast('Sun is below the horizon right now — use the ⚙︎ offset slider instead.'); return; }
+  if(nowSun.alt*DEG < -1){ btnFlash('✗ Sun is below horizon'); toast('Sun is below the horizon right now — use the ⚙︎ offset slider instead.'); return; }
   const diff = ((nowSun.az*DEG - S.heading)+540)%360-180;
-  if(Math.abs(diff)>45){ toast('Point the crosshair at the actual sun, then tap again.'); return; }
+  if(Math.abs(diff)>45){ btnFlash('✗ Aim ⌖ at the sun first'); toast('Point the crosshair at the actual sun, then tap again.'); return; }
   S.offset = Math.round(diff*10)/10; persist();
-  $('calLabel').textContent=(S.offset>=0?'+':'')+S.offset.toFixed(1)+'°';
   $('offIn').value=S.offset; $('offVal').textContent=S.offset.toFixed(1);
+  btnFlash('✓ Calibrated '+(S.offset>=0?'+':'')+S.offset.toFixed(1)+'°');
   toast('Compass calibrated: offset '+(S.offset>=0?'+':'')+S.offset.toFixed(1)+'°');
 });
 
-$('locChip').addEventListener('click', ()=>{ $('latIn').value=S.lat??''; $('lonIn').value=S.lon??''; $('locSheet').classList.add('open'); });
+$('locChip').addEventListener('click', ()=>{ $('setSheet').classList.remove('open'); $('latIn').value=S.lat??''; $('lonIn').value=S.lon??''; $('locSheet').classList.add('open'); });
 $('locSheet').addEventListener('click', e=>{ if(e.target.id==='locSheet') $('locSheet').classList.remove('open'); });
 $('locSave').addEventListener('click', ()=>{
   const la=parseFloat($('latIn').value), lo=parseFloat($('lonIn').value);
@@ -617,10 +630,8 @@ $('setChip').addEventListener('click', ()=> $('setSheet').classList.add('open'))
 $('setSheet').addEventListener('click', e=>{ if(e.target.id==='setSheet') $('setSheet').classList.remove('open'); });
 $('setClose').addEventListener('click', ()=> $('setSheet').classList.remove('open'));
 $('fovIn').addEventListener('input', e=>{ S.fovH=+e.target.value; $('fovVal').textContent=S.fovH; persist(); });
-$('offIn').addEventListener('input', e=>{ S.offset=+e.target.value; $('offVal').textContent=S.offset.toFixed(1);
-  $('calLabel').textContent=(S.offset>=0?'+':'')+S.offset.toFixed(1)+'°'; persist(); });
-$('resetOff').addEventListener('click', ()=>{ S.offset=0; $('offIn').value=0; $('offVal').textContent='0.0'; $('calLabel').textContent='±0°'; persist(); });
-$('calChip').addEventListener('click', ()=> $('setSheet').classList.add('open'));
+$('offIn').addEventListener('input', e=>{ S.offset=+e.target.value; $('offVal').textContent=S.offset.toFixed(1); persist(); });
+$('resetOff').addEventListener('click', ()=>{ S.offset=0; $('offIn').value=0; $('offVal').textContent='0.0'; persist(); });
 
 const isoDate = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 
@@ -654,8 +665,8 @@ async function begin(mode){
   if(S.lat==null){
     // try GPS silently once
     if(navigator.geolocation) navigator.geolocation.getCurrentPosition(
-      p=>setLocation(p.coords.latitude,p.coords.longitude,'GPS'), ()=>{ toast('Tap the top-left chip to set your location.'); }, {timeout:8000});
-    else toast('Tap the top-left chip to set your location.');
+      p=>setLocation(p.coords.latitude,p.coords.longitude,'GPS'), ()=>{ toast('Set your location in ⚙︎ Settings.'); }, {timeout:8000});
+    else toast('Set your location in ⚙︎ Settings.');
   }
 }
 $('startBtn').addEventListener('click', ()=>begin('camera'));
