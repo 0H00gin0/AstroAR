@@ -301,27 +301,65 @@ function deviceToWorld(v, a, b, g){ // intrinsic Z-X'-Y'' → apply Y, then X, t
 function screenAngle(){
   return ((screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0) * RAD;
 }
-function onOrient(e){
-  if(e.alpha==null) return;
-  S.hasSensor = true;
-  const a=e.alpha*RAD, b=e.beta*RAD, g=e.gamma*RAD, sa=screenAngle();
-  // screen-frame basis vectors → device frame (undo screen rotation) → world frame
-  const look = deviceToWorld(Vec.rotZ([0,0,-1],-sa), a,b,g);  // rear camera direction
-  const up   = deviceToWorld(Vec.rotZ([0,1,0],-sa),  a,b,g);  // screen-up
-  const right= deviceToWorld(Vec.rotZ([1,0,0],-sa),  a,b,g);
-  // world: X east, Y north, Z up
+/* Sensor priority: 1) AbsoluteOrientationSensor (fusion, best on Android Chrome)
+   2) deviceorientationabsolute  3) plain deviceorientation (relative — heading is
+   arbitrary until "Calibrate on Sun" pins it). All are attached; best source wins. */
+let sensorSource = null; // 'fusion' | 'absolute' | 'relative'
+const RANK = {fusion:3, absolute:2, relative:1};
+function setAim(look, up, right, src){
+  if(sensorSource && RANK[src] < RANK[sensorSource]) return; // ignore weaker source
+  if(sensorSource !== src){
+    sensorSource = src; S.hasSensor = true;
+    if(src==='relative') toast('Gyro only (no compass). Aim the ⌖ at the sun and tap “Calibrate on Sun” to set north.', 5000);
+  }
   S.heading = ((Math.atan2(look[0], look[1])*DEG)%360+360)%360;
   S.pitch   = Math.asin(Math.max(-1,Math.min(1,look[2])))*DEG;
-  S.roll    = Math.atan2(right[2], up[2]===0&&right[2]===0?1:up[2])*DEG * -1;
+  S.roll    = Math.atan2(right[2], (up[2]===0&&right[2]===0)?1:up[2])*DEG * -1;
+}
+function aimFromEuler(a, b, g, src){
+  const sa = screenAngle();
+  const look = deviceToWorld(Vec.rotZ([0,0,-1],-sa), a,b,g);
+  const up   = deviceToWorld(Vec.rotZ([0,1,0],-sa),  a,b,g);
+  const right= deviceToWorld(Vec.rotZ([1,0,0],-sa),  a,b,g);
+  setAim(look, up, right, src);
+}
+function qRotate(q, v){ // rotate vector by quaternion [x,y,z,w]
+  const qx=q[0],qy=q[1],qz=q[2],qw=q[3];
+  const tx=2*(qy*v[2]-qz*v[1]), ty=2*(qz*v[0]-qx*v[2]), tz=2*(qx*v[1]-qy*v[0]);
+  return [v[0]+qw*tx+qy*tz-qz*ty, v[1]+qw*ty+qz*tx-qx*tz, v[2]+qw*tz+qx*ty-qy*tx];
+}
+function aimFromQuaternion(q){
+  const sa = screenAngle();
+  const look = qRotate(q, Vec.rotZ([0,0,-1],-sa));
+  const up   = qRotate(q, Vec.rotZ([0,1,0],-sa));
+  const right= qRotate(q, Vec.rotZ([1,0,0],-sa));
+  setAim(look, up, right, 'fusion');
+}
+function onOrientAbs(e){ if(e.alpha!=null) aimFromEuler(e.alpha*RAD, e.beta*RAD, e.gamma*RAD, 'absolute'); }
+function onOrientAny(e){
+  if(e.alpha==null) return;
+  aimFromEuler(e.alpha*RAD, e.beta*RAD, e.gamma*RAD, e.absolute===true ? 'absolute' : 'relative');
 }
 function startSensors(){
-  const evt = ('ondeviceorientationabsolute' in window) ? 'deviceorientationabsolute' : 'deviceorientation';
-  const attach = ()=> window.addEventListener(evt, onOrient, true);
+  // Layer 1: Generic Sensor API fusion sensor
+  if('AbsoluteOrientationSensor' in window){
+    try{
+      const s = new AbsoluteOrientationSensor({frequency:30});
+      s.addEventListener('reading', ()=>{ if(s.quaternion) aimFromQuaternion(s.quaternion); });
+      s.addEventListener('error', ()=>{}); // NotAllowed/NotReadable → fall through to layers 2-3
+      s.start();
+    }catch(e){}
+  }
+  // Layers 2 & 3: classic events (both attached; setAim keeps the best)
+  const attach = ()=>{
+    window.addEventListener('deviceorientationabsolute', onOrientAbs, true);
+    window.addEventListener('deviceorientation', onOrientAny, true);
+  };
   if (typeof DeviceOrientationEvent!=='undefined' && DeviceOrientationEvent.requestPermission){
-    DeviceOrientationEvent.requestPermission().then(r=>{ if(r==='granted') attach(); }).catch(()=>{});
+    DeviceOrientationEvent.requestPermission().then(r=>{ if(r==='granted') attach(); }).catch(attach);
   } else attach();
   setTimeout(()=>{ if(!S.hasSensor && S.mode==='camera')
-    toast('No compass data — drag the screen to aim, or use Calibrate on Sun.'); }, 3000);
+    toast('No motion data. Chrome ⋮ → Settings → Site settings → Motion sensors → allow, then reload. Drag to aim meanwhile.', 6000); }, 3500);
 }
 
 /* drag-to-look (virtual mode, or sensor fallback) */
@@ -504,8 +542,9 @@ function timeStr(min){ return String(Math.floor(min/60)).padStart(2,'0')+':'+Str
 function updateReadout(sun){
   $('timeBig').textContent = timeStr(S.minutes);
   $('dateSub').textContent = planDate().toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
-  $('headVal').textContent = fmtDeg(((S.heading+S.offset)%360+360)%360)+' '+azName(((S.heading+S.offset)%360+360)%360)
-                           + (S.hasSensor? '':' (drag)');
+  const aimAz = ((S.heading+S.offset)%360+360)%360;
+  const tag = !S.hasSensor ? ' (drag)' : (sensorSource==='relative' ? ' (gyro·cal!)' : '');
+  $('headVal').textContent = fmtDeg(aimAz)+' '+azName(aimAz)+tag;
   if(sun){
     const moon = moonPosition(planDate(),S.lat,S.lon);
     $('sunVal').textContent = '☀ '+fmtDeg(sun.az*DEG)+' · alt '+fmtDeg(sun.alt*DEG);
