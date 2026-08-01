@@ -141,13 +141,15 @@
   <div class="controls" id="ctrlRow" style="display:none">
     <input type="date" id="datePick" aria-label="Date">
     <button class="btn" id="nowBtn">Now</button>
-    <button class="btn" id="eclBtn">🌒 Eclipse</button>
     <button class="btn primary" id="alignBtn">⌖ Calibrate on Sun</button>
   </div>
   <div class="controls" id="phaseRow" style="display:none"></div>
-  <button id="moreBtn" aria-expanded="false" aria-label="More controls"
-    style="display:block; margin:8px auto 0; padding:2px 26px; border-radius:9px;
-    background:var(--glass); border:1px solid var(--glass-line); font-size:13px; color:var(--text-dim);">⌄</button>
+  <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin-top:8px;">
+    <button class="btn" id="eclBtn" style="padding:5px 14px; font-size:12.5px;">🌒 Eclipse</button>
+    <button id="moreBtn" aria-expanded="false" aria-label="More controls"
+      style="padding:5px 26px; border-radius:9px; background:var(--glass);
+      border:1px solid var(--glass-line); font-size:13px; color:var(--text-dim);">⌄</button>
+  </div>
 </div>
 
 <!-- location sheet -->
@@ -199,8 +201,23 @@
 
 <div id="start">
   <div class="horizon-deco"></div><div class="monument"></div>
+  <svg width="130" height="130" viewBox="0 0 130 130" style="margin-bottom:18px" aria-hidden="true">
+    <defs>
+      <radialGradient id="corona" cx="50%" cy="50%" r="50%">
+        <stop offset="30%" stop-color="rgba(255,200,92,.85)"/>
+        <stop offset="55%" stop-color="rgba(255,158,61,.35)"/>
+        <stop offset="100%" stop-color="rgba(255,158,61,0)"/>
+      </radialGradient>
+      <mask id="bite">
+        <rect width="130" height="130" fill="white"/>
+        <circle cx="83" cy="52" r="34" fill="black"/>
+      </mask>
+    </defs>
+    <circle cx="65" cy="65" r="62" fill="url(#corona)"/>
+    <circle cx="65" cy="65" r="34" fill="#FFDD87" mask="url(#bite)"/>
+    <circle cx="83" cy="52" r="34" fill="#0B0E1A" stroke="rgba(201,214,232,.28)" stroke-width="1"/>
+  </svg>
   <h1>Sky<span>line</span></h1>
-  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v11</p>
   <p>Point your camera at a landmark, scrub to any future date and time, and see exactly where the sun and moon will hang in your frame.</p>
   <button class="btn primary" id="startBtn">Start camera</button>
   <button class="alt" id="virtualBtn">No camera? Use virtual view</button>
