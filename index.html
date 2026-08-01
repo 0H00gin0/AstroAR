@@ -141,8 +141,10 @@
   <div class="controls" id="ctrlRow" style="display:none">
     <input type="date" id="datePick" aria-label="Date">
     <button class="btn" id="nowBtn">Now</button>
+    <button class="btn" id="eclBtn">🌒 Eclipse</button>
     <button class="btn primary" id="alignBtn">⌖ Calibrate on Sun</button>
   </div>
+  <div class="controls" id="phaseRow" style="display:none"></div>
   <button id="moreBtn" aria-expanded="false" aria-label="More controls"
     style="display:block; margin:8px auto 0; padding:2px 26px; border-radius:9px;
     background:var(--glass); border:1px solid var(--glass-line); font-size:13px; color:var(--text-dim);">⌄</button>
@@ -198,7 +200,7 @@
 <div id="start">
   <div class="horizon-deco"></div><div class="monument"></div>
   <h1>Sky<span>line</span></h1>
-  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v10</p>
+  <p style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:18px; color:var(--sun)">build v11</p>
   <p>Point your camera at a landmark, scrub to any future date and time, and see exactly where the sun and moon will hang in your frame.</p>
   <button class="btn primary" id="startBtn">Start camera</button>
   <button class="alt" id="virtualBtn">No camera? Use virtual view</button>
@@ -211,55 +213,127 @@
 
 <script>
 "use strict";
-/* ================= astronomy (SunCalc-style, standard low-precision algorithms) ================= */
-const RAD = Math.PI/180, DEG = 180/Math.PI, E_OBL = 23.4397*RAD;
+/* ================= astronomy (Meeus truncated series — eclipse-grade) ================= */
+const RAD = Math.PI/180, DEG = 180/Math.PI;
 const dayMs = 86400000, J1970 = 2440588, J2000 = 2451545;
 const toDays = date => date.valueOf()/dayMs - 0.5 + J1970 - J2000;
+const norm = a => ((a%360)+360)%360;
 
-const rightAscension = (l,b) => Math.atan2(Math.sin(l)*Math.cos(E_OBL) - Math.tan(b)*Math.sin(E_OBL), Math.cos(l));
-const declination    = (l,b) => Math.asin(Math.sin(b)*Math.cos(E_OBL) + Math.cos(b)*Math.sin(E_OBL)*Math.sin(l));
-const siderealTime   = (d,lw) => RAD*(280.16 + 360.9856235*d) - lw;
-
-function altAz(H, phi, dec){
-  const alt = Math.asin(Math.sin(phi)*Math.sin(dec) + Math.cos(phi)*Math.cos(dec)*Math.cos(H));
-  // azimuth from NORTH, clockwise (SunCalc measures from south; +PI converts)
-  const az = Math.atan2(Math.sin(H), Math.cos(H)*Math.sin(phi) - Math.tan(dec)*Math.cos(phi)) + Math.PI;
-  return {alt, az: (az%(2*Math.PI)+2*Math.PI)%(2*Math.PI)};
+function sunEcl(d){ // apparent ecliptic longitude + distance (Meeus ch.25)
+  const T=d/36525;
+  const L0=norm(280.46646+36000.76983*T+0.0003032*T*T);
+  const M=norm(357.52911+35999.05029*T-0.0001537*T*T), Mr=M*RAD;
+  const C=(1.914602-0.004817*T-0.000014*T*T)*Math.sin(Mr)
+         +(0.019993-0.000101*T)*Math.sin(2*Mr)+0.000289*Math.sin(3*Mr);
+  const appLon=L0+C-0.00569-0.00478*Math.sin((125.04-1934.136*T)*RAD);
+  const e=0.016708634-0.000042037*T, v=(M+C)*RAD;
+  return {lon:norm(appLon)*RAD, distAU:1.000001018*(1-e*e)/(1+e*Math.cos(v))};
 }
-function solarCoords(d){
-  const M = RAD*(357.5291 + 0.98560028*d);
-  const C = RAD*(1.9148*Math.sin(M) + 0.02*Math.sin(2*M) + 0.0003*Math.sin(3*M));
-  const L = M + C + RAD*102.9372 + Math.PI;
-  return {dec: declination(L,0), ra: rightAscension(L,0)};
+const TL=[[0,0,1,0,6288774,-20905355],[2,0,-1,0,1274027,-3699111],[2,0,0,0,658314,-2955968],
+[0,0,2,0,213618,-569925],[0,1,0,0,-185116,48888],[0,0,0,2,-114332,-3149],
+[2,0,-2,0,58793,246158],[2,-1,-1,0,57066,-152138],[2,0,1,0,53322,-170733],
+[2,-1,0,0,45758,-204586],[0,1,-1,0,-40923,-129620],[1,0,0,0,-34720,108743],
+[0,1,1,0,-30383,104755],[2,0,0,-2,15327,10321],[0,0,1,2,-12528,0],
+[0,0,1,-2,10980,79661],[4,0,-1,0,10675,-34782],[0,0,3,0,10034,-23210],
+[4,0,-2,0,8548,-21636],[2,1,-1,0,-7888,24208],[2,1,0,0,-6766,30824],
+[1,0,-1,0,-5163,-8379],[1,1,0,0,4987,-16675],[2,-1,1,0,4036,-12831],
+[2,0,2,0,3994,-10445],[4,0,0,0,3861,-11650],[2,0,-3,0,3665,14403],
+[0,1,-2,0,-2689,-7003],[2,0,-1,2,-2602,0],[2,-1,-2,0,2390,10056],
+[1,0,1,0,-2348,6322],[2,-2,0,0,2236,-9884]];
+const TB=[[0,0,0,1,5128122],[0,0,1,1,280602],[0,0,1,-1,277693],[2,0,0,-1,173237],
+[2,0,-1,1,55413],[2,0,-1,-1,46271],[2,0,0,1,32573],[0,0,2,1,17198],
+[2,0,1,-1,9266],[0,0,2,-1,8822],[2,-1,0,-1,8216],[2,0,-2,-1,4324],
+[2,0,1,1,4200],[2,1,0,-1,-3359],[2,-1,-1,1,2463],[2,-1,0,1,2211],
+[2,-1,-1,-1,2065],[0,1,-1,-1,-1870],[4,0,-1,-1,1828],[0,1,0,1,-1794],
+[0,0,0,3,-1749],[0,1,-1,1,-1565],[1,0,0,1,-1491],[0,1,1,1,-1475],
+[0,1,1,-1,-1410],[0,1,0,-1,-1344],[1,0,0,-1,-1335],[0,0,3,1,1107]];
+function moonEcl(d){ // Meeus ch.47 truncated (~arcmin class)
+  const T=d/36525;
+  const Lp=norm(218.3164477+481267.88123421*T-0.0015786*T*T);
+  const D =norm(297.8501921+445267.1114034*T-0.0018819*T*T);
+  const M =norm(357.5291092+35999.0502909*T-0.0001536*T*T);
+  const Mp=norm(134.9633964+477198.8675055*T+0.0087414*T*T);
+  const F =norm(93.2720950+483202.0175233*T-0.0036539*T*T);
+  const A1=norm(119.75+131.849*T), A2=norm(53.09+479264.290*T), A3=norm(313.45+481266.484*T);
+  const E=1-0.002516*T-0.0000074*T*T, E2=E*E;
+  let sl=0, sr=0, sb=0;
+  for(const [td,tm,tp,tf,cl,cr] of TL){
+    const arg=(td*D+tm*M+tp*Mp+tf*F)*RAD, e=tm===0?1:(Math.abs(tm)===1?E:E2);
+    sl+=cl*e*Math.sin(arg); sr+=cr*e*Math.cos(arg);
+  }
+  for(const [td,tm,tp,tf,cb] of TB){
+    const arg=(td*D+tm*M+tp*Mp+tf*F)*RAD, e=tm===0?1:(Math.abs(tm)===1?E:E2);
+    sb+=cb*e*Math.sin(arg);
+  }
+  sl+=3958*Math.sin(A1*RAD)+1962*Math.sin((Lp-F)*RAD)+318*Math.sin(A2*RAD);
+  sb+=-2235*Math.sin(Lp*RAD)+382*Math.sin(A3*RAD)+175*Math.sin((A1-F)*RAD)
+     +175*Math.sin((A1+F)*RAD)+127*Math.sin((Lp-Mp)*RAD)-115*Math.sin((Lp+Mp)*RAD);
+  return {lon:norm(Lp+sl/1e6)*RAD, lat:(sb/1e6)*RAD, dist:385000.56+sr/1000};
+}
+function eclToEq(lon,lat,d){
+  const T=d/36525, eps=(23.4392911-0.0130042*T)*RAD;
+  return {
+    ra: Math.atan2(Math.sin(lon)*Math.cos(eps)-Math.tan(lat)*Math.sin(eps), Math.cos(lon)),
+    dec: Math.asin(Math.sin(lat)*Math.cos(eps)+Math.cos(lat)*Math.sin(eps)*Math.sin(lon))
+  };
+}
+const siderealTime = (d,lw) => RAD*(280.16 + 360.9856235*d) - lw;
+function toAltAz(ra,dec,d,lat,lon){
+  const lw=-lon*RAD, phi=lat*RAD, H=siderealTime(d,lw)-ra;
+  const alt=Math.asin(Math.sin(phi)*Math.sin(dec)+Math.cos(phi)*Math.cos(dec)*Math.cos(H));
+  const az=Math.atan2(Math.sin(H), Math.cos(H)*Math.sin(phi)-Math.tan(dec)*Math.cos(phi))+Math.PI;
+  return {alt, az:(az%(2*Math.PI)+2*Math.PI)%(2*Math.PI)};
 }
 function sunPosition(date, lat, lon){
-  const lw = -lon*RAD, phi = lat*RAD, d = toDays(date);
-  const c = solarCoords(d), H = siderealTime(d,lw) - c.ra;
-  return altAz(H, phi, c.dec);
-}
-function moonCoords(d){
-  const L = RAD*(218.316 + 13.176396*d),
-        M = RAD*(134.963 + 13.064993*d),
-        F = RAD*(93.272  + 13.229350*d),
-        l = L + RAD*6.289*Math.sin(M),
-        b = RAD*5.128*Math.sin(F),
-        dt = 385001 - 20905*Math.cos(M);
-  return {ra: rightAscension(l,b), dec: declination(l,b), dist: dt};
+  const d=toDays(date), s=sunEcl(d), eq=eclToEq(s.lon,0,d);
+  const aa=toAltAz(eq.ra,eq.dec,d,lat,lon);
+  return {alt:aa.alt, az:aa.az, rSun:0.26667/s.distAU};
 }
 function moonPosition(date, lat, lon){
-  const lw=-lon*RAD, phi=lat*RAD, d=toDays(date);
-  const c = moonCoords(d), H = siderealTime(d,lw) - c.ra;
-  let {alt, az} = altAz(H, phi, c.dec);
-  alt += RAD*0.017/Math.tan(alt + RAD*10.26/(alt+RAD*5.10)); // refraction approx
-  return {alt, az, dist:c.dist};
+  const d=toDays(date), m=moonEcl(d), eq=eclToEq(m.lon,m.lat,d);
+  const aa=toAltAz(eq.ra,eq.dec,d,lat,lon);
+  const alt=aa.alt - Math.asin(6371/m.dist)*Math.cos(aa.alt); // topocentric parallax
+  return {alt, az:aa.az, dist:m.dist, rMoon:Math.asin(1737.4/m.dist)*DEG};
 }
 function moonIllumination(date){
-  const d = toDays(date), s = solarCoords(d), m = moonCoords(d), sdist = 149598000;
-  const phi = Math.acos(Math.sin(s.dec)*Math.sin(m.dec) + Math.cos(s.dec)*Math.cos(m.dec)*Math.cos(s.ra-m.ra));
-  const inc = Math.atan2(sdist*Math.sin(phi), m.dist - sdist*Math.cos(phi));
-  return (1+Math.cos(inc))/2;
+  const d=toDays(date), s=sunEcl(d), m=moonEcl(d);
+  const g=Math.acos(Math.max(-1,Math.min(1,Math.cos(m.lat)*Math.cos(m.lon-s.lon))));
+  return (1-Math.cos(g))/2;
 }
-
+/* ---- eclipse geometry ---- */
+function angularSep(a1,z1,a2,z2){
+  return Math.acos(Math.max(-1,Math.min(1,
+    Math.sin(a1)*Math.sin(a2)+Math.cos(a1)*Math.cos(a2)*Math.cos(z1-z2))));
+}
+function obscuration(R,r,d){
+  if(d>=R+r) return 0;
+  if(d<=Math.abs(r-R)) return r>=R?1:(r*r)/(R*R);
+  const a1=Math.acos((d*d+R*R-r*r)/(2*d*R)), a2=Math.acos((d*d+r*r-R*R)/(2*d*r));
+  return (R*R*a1+r*r*a2-0.5*Math.sqrt(Math.max(0,(-d+R+r)*(d+R-r)*(d-R+r)*(d+R+r))))/(Math.PI*R*R);
+}
+function eclipseAt(t, lat, lon){
+  const s=sunPosition(t,lat,lon), m=moonPosition(t,lat,lon);
+  const sep=angularSep(s.alt,s.az,m.alt,m.az)*DEG;
+  return {obs:obscuration(s.rSun,m.rMoon,sep), sunUp:s.alt*DEG>-0.8, s, m, sep};
+}
+function scanEclipse(dateObj, lat, lon){
+  const d0=new Date(dateObj); d0.setHours(0,0,0,0);
+  let c1=null,c4=null,best=null,bestObs=0;
+  for(let mi=0; mi<=1440; mi+=2){
+    const t=new Date(d0.getTime()+mi*60000), e=eclipseAt(t,lat,lon);
+    if(e.obs>0 && e.sunUp){ if(!c1)c1=t; c4=t; if(e.obs>bestObs){bestObs=e.obs; best=t;} }
+  }
+  if(!c1) return null;
+  let lo=best.getTime()-120000, hi=best.getTime()+120000;
+  for(let step=60000; step>=10000; step=Math.floor(step/2)){
+    for(let tt=lo; tt<=hi; tt+=step){
+      const e=eclipseAt(new Date(tt),lat,lon);
+      if(e.obs>bestObs){bestObs=e.obs; best=new Date(tt);}
+    }
+    lo=best.getTime()-step; hi=best.getTime()+step;
+  }
+  return {c1, max:best, c4, maxObs:bestObs};
+}
 /* ================= app state ================= */
 const S = {
   lat: null, lon: null,
@@ -510,10 +584,42 @@ function draw(){
 
   /* bodies */
   const sp = project(sun.az*DEG, sun.alt*DEG);
-  const sunR = Math.max(10, (W/S.fovH)*0.53);   // real angular size ≈0.53°, min 10px for visibility
-  if(sp.visible) drawBody(sp, sunR, '#FFDD87','rgba(255,180,60,.55)',
+  const sunR = Math.max(10, (W/S.fovH)*0.53);
+  let eclNow = null;
+  if(S.eclOn){
+    const en = eclipseAt(when, S.lat, S.lon);
+    if(en.obs>0) eclNow = en;
+  }
+  if(sp.visible && eclNow){
+    // magnified sun+moon composite: true geometry, scaled up for visibility
+    const Z = 6, ppd = W/S.fovH;
+    const Rpx = Math.max(26, eclNow.s.rSun*ppd*Z);
+    const rpx = Rpx * (eclNow.m.rMoon/eclNow.s.rSun);
+    const mp2 = project(moon.az*DEG, moon.alt*DEG);
+    const dx = (mp2.x-sp.x)*Z, dy = (mp2.y-sp.y)*Z;
+    // sun disc + glow
+    const g1 = ctx.createRadialGradient(sp.x,sp.y,Rpx*.3, sp.x,sp.y,Rpx*2.4);
+    g1.addColorStop(0,'rgba(255,180,60,.5)'); g1.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g1; ctx.beginPath(); ctx.arc(sp.x,sp.y,Rpx*2.4,0,7); ctx.fill();
+    ctx.fillStyle='#FFDD87'; ctx.beginPath(); ctx.arc(sp.x,sp.y,Rpx,0,7); ctx.fill();
+    // moon silhouette
+    ctx.fillStyle='rgba(10,12,24,.96)';
+    ctx.beginPath(); ctx.arc(sp.x+dx, sp.y+dy, rpx, 0, 7); ctx.fill();
+    ctx.strokeStyle='rgba(200,214,235,.35)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(sp.x+dx, sp.y+dy, rpx, 0, 7); ctx.stroke();
+    // labels
+    ctx.font='600 13px Space Grotesk,sans-serif'; ctx.textAlign='center';
+    const ly = sp.y - Math.max(Rpx, Math.abs(dy)+rpx) - 10;
+    ctx.fillStyle='rgba(0,0,0,.55)';
+    ctx.fillText('🌒 '+ (eclNow.obs*100).toFixed(1)+'% eclipsed · '+timeStr(S.minutes), sp.x+1, ly-13);
+    ctx.fillText('shown ×'+Z+' size · true position', sp.x+1, ly+1);
+    ctx.fillStyle='#FFD27A';
+    ctx.fillText('🌒 '+ (eclNow.obs*100).toFixed(1)+'% eclipsed · '+timeStr(S.minutes), sp.x, ly-14);
+    ctx.fillStyle='rgba(255,255,255,.8)';
+    ctx.fillText('shown ×'+Z+' size · true position', sp.x, ly);
+  } else if(sp.visible) drawBody(sp, sunR, '#FFDD87','rgba(255,180,60,.55)',
       '☀ '+timeStr(S.minutes), fmtDeg(sun.az*DEG)+' '+azName(sun.az*DEG)+' · alt '+fmtDeg(sun.alt*DEG));
-  if(S.showMoon){
+  if(S.showMoon && !eclNow){
     const mp = project(moon.az*DEG, moon.alt*DEG);
     if(mp.visible) drawBody(mp, Math.max(8,(W/S.fovH)*0.5), '#DDE6F2','rgba(180,200,230,.4)',
         '☾ '+Math.round(moonIllumination(when)*100)+'%', fmtDeg(moon.az*DEG)+' · alt '+fmtDeg(moon.alt*DEG));
@@ -637,6 +743,47 @@ $('fovIn').addEventListener('input', e=>{ S.fovH=+e.target.value; $('fovVal').te
 $('offIn').addEventListener('input', e=>{ S.offset=+e.target.value; $('offVal').textContent=S.offset.toFixed(1); persist(); });
 $('resetOff').addEventListener('click', ()=>{ S.offset=0; $('offIn').value=0; $('offVal').textContent='0.0'; persist(); });
 
+S.ecl = null; S.eclOn = false;
+function phaseChip(label, t){
+  const b=document.createElement('button'); b.className='btn'; b.textContent=label;
+  b.addEventListener('click', ()=>{
+    S.date = new Date(t); S.minutes = t.getHours()*60 + t.getMinutes();
+    $('timeSlider').value=S.minutes; $('datePick').value=isoDate(t);
+  });
+  return b;
+}
+function buildPhaseRow(e){
+  const row=$('phaseRow'); row.innerHTML='';
+  const span=e.c4.getTime()-e.c1.getTime();
+  const q1=new Date(e.c1.getTime()+span*0.25), q3=new Date(e.c1.getTime()+span*0.75);
+  const hm=t=>String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+  row.appendChild(phaseChip('Start '+hm(e.c1), e.c1));
+  row.appendChild(phaseChip('¼', q1));
+  const mx=phaseChip('Max '+hm(e.max)+' · '+Math.round(e.maxObs*100)+'%', e.max);
+  mx.classList.add('primary'); row.appendChild(mx);
+  row.appendChild(phaseChip('¾', q3));
+  row.appendChild(phaseChip('End '+hm(e.c4), e.c4));
+  row.style.display='flex';
+}
+$('eclBtn').addEventListener('click', ()=>{
+  if(S.eclOn){ S.eclOn=false; S.ecl=null; $('phaseRow').style.display='none'; $('eclBtn').textContent='🌒 Eclipse'; return; }
+  if(S.lat==null){ toast('Set your location first (⚙︎ → Location).'); return; }
+  toast('Scanning for a solar eclipse…');
+  setTimeout(()=>{
+    let e = scanEclipse(planDate(), S.lat, S.lon), when = new Date(S.date);
+    if(!e){ // try the next big one: 12 Aug 2026 (Europe/N. America/Arctic)
+      const d2=new Date(2026,7,12,12,0,0);
+      e = scanEclipse(d2, S.lat, S.lon);
+      if(e) when=d2;
+    }
+    if(!e){ toast('No solar eclipse visible from this location on this date (also checked 12 Aug 2026).', 5000); return; }
+    S.date=when; $('datePick').value=isoDate(when);
+    S.ecl=e; S.eclOn=true; $('eclBtn').textContent='🌒 Eclipse ✓';
+    buildPhaseRow(e);
+    S.minutes=e.max.getHours()*60+e.max.getMinutes(); $('timeSlider').value=S.minutes;
+    toast('Eclipse found: max '+Math.round(e.maxObs*100)+'% obscured. NEVER look at the sun without ISO 12312-2 eclipse glasses.', 6000);
+  }, 50);
+});
 const isoDate = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 
 async function begin(mode){
