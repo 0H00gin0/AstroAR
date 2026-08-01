@@ -141,15 +141,13 @@
   <div class="controls" id="ctrlRow" style="display:none">
     <input type="date" id="datePick" aria-label="Date">
     <button class="btn" id="nowBtn">Now</button>
+    <button class="btn" id="eclBtn">🌒 Eclipse</button>
     <button class="btn primary" id="alignBtn">⌖ Calibrate on Sun</button>
   </div>
   <div class="controls" id="phaseRow" style="display:none"></div>
-  <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin-top:8px;">
-    <button class="btn" id="eclBtn" style="padding:5px 14px; font-size:12.5px;">🌒 Eclipse</button>
-    <button id="moreBtn" aria-expanded="false" aria-label="More controls"
-      style="padding:5px 26px; border-radius:9px; background:var(--glass);
-      border:1px solid var(--glass-line); font-size:13px; color:var(--text-dim);">⌄</button>
-  </div>
+  <button id="moreBtn" aria-expanded="false" aria-label="More controls"
+    style="display:block; margin:8px auto 0; padding:5px 26px; border-radius:9px;
+    background:var(--glass); border:1px solid var(--glass-line); font-size:13px; color:var(--text-dim);">⌄</button>
 </div>
 
 <!-- location sheet -->
@@ -709,6 +707,7 @@ $('moonBtn').addEventListener('click', e=>{ S.showMoon=!S.showMoon; e.target.tex
 $('moreBtn').addEventListener('click', e=>{
   const row=$('ctrlRow'), open = row.style.display!=='none';
   row.style.display = open?'none':'flex';
+  $('phaseRow').style.display = (!open && S.eclOn) ? 'flex' : 'none';
   e.target.textContent = open?'⌄':'⌃';
   e.target.setAttribute('aria-expanded', String(!open));
 });
@@ -751,6 +750,7 @@ function setLocation(la,lo,src){
   $('locLabel').textContent = S.lat.toFixed(3)+', '+S.lon.toFixed(3);
   $('locDot').classList.remove('warn');
   toast('Location set ('+src+').');
+  autoEclipse();
 }
 
 $('setChip').addEventListener('click', ()=> $('setSheet').classList.add('open'));
@@ -780,26 +780,39 @@ function buildPhaseRow(e){
   mx.classList.add('primary'); row.appendChild(mx);
   row.appendChild(phaseChip('¾', q3));
   row.appendChild(phaseChip('End '+hm(e.c4), e.c4));
-  row.style.display='flex';
+}
+function enableEclipse(auto){
+  let e = scanEclipse(planDate(), S.lat, S.lon), when = new Date(S.date);
+  if(!e){ // try the next big one: 12 Aug 2026 (Europe/N. America/Arctic)
+    const d2=new Date(2026,7,12,12,0,0);
+    e = scanEclipse(d2, S.lat, S.lon);
+    if(e) when=d2;
+  }
+  if(!e){
+    if(!auto) toast('No solar eclipse visible from this location on this date (also checked 12 Aug 2026).', 5000);
+    return false;
+  }
+  S.date=when; $('datePick').value=isoDate(when);
+  S.ecl=e; S.eclOn=true; $('eclBtn').textContent='🌒 Eclipse ✓';
+  buildPhaseRow(e);
+  $('phaseRow').style.display = $('ctrlRow').style.display!=='none' ? 'flex' : 'none';
+  S.minutes=e.max.getHours()*60+e.max.getMinutes(); $('timeSlider').value=S.minutes;
+  toast((auto?'Eclipse mode on: ':'Eclipse found: ')+'max '+Math.round(e.maxObs*100)+'% eclipsed on '
+    + when.toLocaleDateString(undefined,{day:'numeric',month:'short'})
+    + '. Use ISO 12312-2 eclipse glasses for your eyes.', 6000);
+  return true;
+}
+let autoEclDone = false;
+function autoEclipse(){
+  if(autoEclDone || S.eclOn || S.lat==null) return;
+  autoEclDone = true;
+  setTimeout(()=>enableEclipse(true), 80);
 }
 $('eclBtn').addEventListener('click', ()=>{
   if(S.eclOn){ S.eclOn=false; S.ecl=null; $('phaseRow').style.display='none'; $('eclBtn').textContent='🌒 Eclipse'; return; }
   if(S.lat==null){ toast('Set your location first (⚙︎ → Location).'); return; }
   toast('Scanning for a solar eclipse…');
-  setTimeout(()=>{
-    let e = scanEclipse(planDate(), S.lat, S.lon), when = new Date(S.date);
-    if(!e){ // try the next big one: 12 Aug 2026 (Europe/N. America/Arctic)
-      const d2=new Date(2026,7,12,12,0,0);
-      e = scanEclipse(d2, S.lat, S.lon);
-      if(e) when=d2;
-    }
-    if(!e){ toast('No solar eclipse visible from this location on this date (also checked 12 Aug 2026).', 5000); return; }
-    S.date=when; $('datePick').value=isoDate(when);
-    S.ecl=e; S.eclOn=true; $('eclBtn').textContent='🌒 Eclipse ✓';
-    buildPhaseRow(e);
-    S.minutes=e.max.getHours()*60+e.max.getMinutes(); $('timeSlider').value=S.minutes;
-    toast('Eclipse found: max '+Math.round(e.maxObs*100)+'% obscured. NEVER look at the sun without ISO 12312-2 eclipse glasses.', 6000);
-  }, 50);
+  setTimeout(()=>enableEclipse(false), 50);
 });
 const isoDate = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 
@@ -812,7 +825,7 @@ async function begin(mode){
   $('timeSlider').value=S.minutes;
   $('fovIn').value=S.fovH; $('fovVal').textContent=S.fovH;
   $('offIn').value=S.offset; $('offVal').textContent=S.offset.toFixed(1);
-  if(S.lat!=null){ $('locLabel').textContent=S.lat.toFixed(3)+', '+S.lon.toFixed(3); $('locDot').classList.remove('warn'); }
+  if(S.lat!=null){ $('locLabel').textContent=S.lat.toFixed(3)+', '+S.lon.toFixed(3); $('locDot').classList.remove('warn'); autoEclipse(); }
 
   if(mode==='camera'){
     try{
