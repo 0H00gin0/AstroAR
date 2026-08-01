@@ -190,6 +190,10 @@
       <label>Moon overlay</label>
       <button class="btn" id="moonBtn">☾ Moon on</button>
     </div>
+    <div class="field">
+      <label>Pigeon mode</label>
+      <button class="btn" id="pigBtn">🐦 Pigeons off</button>
+    </div>
     <div class="sheet-actions">
       <button class="btn" id="resetOff">Reset offset</button>
       <button class="btn primary" id="setClose">Done</button>
@@ -547,7 +551,7 @@ function draw(){
   if(S.mode==null) return;
   if(S.mode==='virtual') drawVirtualSky();
   ctx.clearRect(0,0,W,H);
-  if(S.lat==null){ drawCrosshair(true); updateReadout(); return; }
+  if(S.lat==null){ drawCrosshair(true); if(S.pigeons) runPigeons(); updateReadout(); return; }
 
   const when = planDate();
   const sun  = sunPosition(when, S.lat, S.lon);
@@ -641,6 +645,7 @@ function draw(){
   }
 
   drawCrosshair(false);
+  if(S.pigeons) runPigeons();
   updateReadout();
   /* off-screen sun pointer */
   if(!sp.visible || sp.x<0||sp.x>W||sp.y<0||sp.y>H) drawEdgeArrow(sun);
@@ -696,6 +701,69 @@ function updateReadout(){
   $('headVal').textContent = fmtDeg(aimAz)+' '+azName(aimAz)+tag;
 }
 
+/* ================= pigeon mode ================= */
+S.pigeons=false;
+let flock=null;
+function makeFlock(){
+  flock=[];
+  const n=14;
+  for(let i=0;i<n;i++){
+    const a=Math.random()*6.283;
+    flock.push({x:Math.random()*W, y:Math.random()*H*0.7,
+      vx:Math.cos(a)*2, vy:Math.sin(a)*2,
+      phase:Math.random()*6.283, tone:0.85+Math.random()*0.3});
+  }
+}
+function stepFlock(){
+  const SEP=26, ALI=60, COH=90, MAX=3.4, MIN=1.6;
+  for(const b of flock){
+    let sx=0,sy=0,ax=0,ay=0,cx=0,cy=0,na=0,nc=0;
+    for(const o of flock){
+      if(o===b) continue;
+      const dx=o.x-b.x, dy=o.y-b.y, d=Math.hypot(dx,dy);
+      if(d<SEP && d>0){ sx-=dx/d; sy-=dy/d; }
+      if(d<ALI){ ax+=o.vx; ay+=o.vy; na++; }
+      if(d<COH){ cx+=o.x; cy+=o.y; nc++; }
+    }
+    if(na){ ax=ax/na-b.vx; ay=ay/na-b.vy; }
+    if(nc){ cx=cx/nc-b.x; cy=cy/nc-b.y; }
+    b.vx += sx*0.09 + ax*0.045 + cx*0.0018;
+    b.vy += sy*0.09 + ay*0.045 + cy*0.0018;
+    b.vy += Math.sin(performance.now()/900 + b.phase)*0.03; // lazy undulation
+    const sp=Math.hypot(b.vx,b.vy)||1;
+    const cl=Math.max(MIN, Math.min(MAX, sp));
+    b.vx=b.vx/sp*cl; b.vy=b.vy/sp*cl;
+    b.x+=b.vx; b.y+=b.vy;
+    if(b.x<-30)b.x=W+30; if(b.x>W+30)b.x=-30;
+    if(b.y<-30)b.y=H+30; if(b.y>H+30)b.y=-30;
+  }
+}
+function drawPigeon(b){
+  const s=3, flap=Math.sin(performance.now()/90 + b.phase*7)>0;
+  const dir=b.vx>=0?1:-1, t=b.tone;
+  const C=(r,g,bl)=>'rgb('+(r*t|0)+','+(g*t|0)+','+(bl*t|0)+')';
+  const body=C(150,156,168), dark=C(96,102,116), wing=C(122,129,142),
+        neck=C(96,150,120), beak='#D98A3D', eye='#1A1D26';
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.scale(dir,1);
+  ctx.rotate(Math.atan2(b.vy, Math.abs(b.vx))*0.5);
+  const P=(x,y,w,h,c)=>{ctx.fillStyle=c; ctx.fillRect(x*s,y*s,w*s,h*s);};
+  P(-4,-1,7,3,body);          // body
+  P(2,-3,3,3,dark);           // head
+  P(3,-3.6,1,1,eye);          // eye? keep grid: use eye pixel
+  P(5,-2,2,1,beak);           // beak
+  P(1,-1,2,1,neck);           // iridescent neck patch
+  P(-6,0,2,1,dark);           // tail
+  if(flap){ P(-2,-4,4,2,wing); P(-1,-2,3,1,wing); }   // wings up
+  else    { P(-2,1,4,2,wing);  P(-1,1,3,1,wing); }    // wings down
+  ctx.restore();
+}
+function runPigeons(){
+  if(!flock) makeFlock();
+  stepFlock();
+  for(const b of flock) drawPigeon(b);
+}
 /* ================= UI wiring ================= */
 $('timeSlider').addEventListener('input', e=> S.minutes=+e.target.value);
 $('datePick').addEventListener('change', e=>{ if(e.target.value) S.date=new Date(e.target.value+'T12:00:00'); });
@@ -704,6 +772,11 @@ $('nowBtn').addEventListener('click', ()=>{
   $('timeSlider').value=S.minutes; $('datePick').value=isoDate(n);
 });
 $('moonBtn').addEventListener('click', e=>{ S.showMoon=!S.showMoon; e.target.textContent=S.showMoon?'☾ Moon on':'☾ Moon off'; });
+$('pigBtn').addEventListener('click', e=>{
+  S.pigeons=!S.pigeons;
+  e.target.textContent = S.pigeons?'🐦 Pigeons on':'🐦 Pigeons off';
+  if(S.pigeons && !flock) makeFlock();
+});
 $('moreBtn').addEventListener('click', e=>{
   const row=$('ctrlRow'), open = row.style.display!=='none';
   row.style.display = open?'none':'flex';
